@@ -114,17 +114,18 @@ class VisualizerPainter extends CustomPainter {
     this.height,
     this.color,
   }) : wavePaint = new Paint()
-        ..color = color.withOpacity(0.75)
-        ..style = PaintingStyle.fill;
+    ..color = color.withOpacity(0.75)
+    ..style = PaintingStyle.fill;
 
   @override
   void paint(Canvas canvas, Size size) {
     _renderWaves(canvas, size);
   }
-  
+
   void _renderWaves(Canvas canvas, Size size) {
-    final histogramLow = _createHistogram(fft, 15, 2, ((fft.length) / 4).floor());
-    final histogramHigh = _createHistogram(fft, 15, (fft.length / 4).ceil(), (fft.length / 2).floor());
+    // Starting from the 10th sample since the lower bins are barely audible
+    final histogramLow = _createHistogram(fft, 16, 12, ((fft.length - 2) / 4).floor() + 10);
+    final histogramHigh = _createHistogram(fft, 16, ((fft.length - 2) / 4).ceil() + 10, ((fft.length - 2) / 2).floor());
 
     _renderHistogram(canvas, size, histogramLow);
     _renderHistogram(canvas, size, histogramHigh);
@@ -153,9 +154,9 @@ class VisualizerPainter extends CustomPainter {
     path.lineTo(points[0], points[1]);
     for (int i = 2; i < points.length - 4; i += 2) {
       path.cubicTo(
-        points[i - 2] + 10.0, points[i - 1],
-        points[i] - 10.0, points [i + 1],
-        points[i], points[i + 1]
+          points[i - 2] + 10.0, points[i - 1],
+          points[i] - 10.0, points [i + 1],
+          points[i], points[i + 1]
       );
     }
     path.lineTo(size.width, size.height);
@@ -169,6 +170,9 @@ class VisualizerPainter extends CustomPainter {
       return const [];
     }
 
+    // Make sure we're not starting in the middle of an imaginary pair!
+    assert(start > 1 && start % 2 == 0);
+
     start = start ?? 0;
     end = end ?? samples.length - 1;
     final sampleCount = end - start + 1;
@@ -179,25 +183,28 @@ class VisualizerPainter extends CustomPainter {
     }
 
     final actualSampleCount = sampleCount - (sampleCount % samplesPerBucket);
-    List<int> histogram = new List<int>.filled(bucketCount, 0);
+    List<double> histogram = new List<double>.filled(bucketCount + 1, 0.0);
 
-    // Add up the frequency amounts for each bucket.
     for (int i = start; i <= start + actualSampleCount; ++i) {
-      // Ignore the imaginary half of each FFT sample
       if ((i - start) % 2 == 1) {
         continue;
       }
 
+      // Calculate the magnitude of the FFT result for the bin while removing
+      // the phase correlation information by calculating the raw magnitude
+      double magnitude = sqrt((pow(samples[i], 2) + pow(samples[i + 1], 2)));
+      // Convert the raw magnitude to Decibels Full Scale (dBFS) assuming an 8 bit value
+      // and clamp it to get rid of astronomically small numbers and -Infinity when array is empty.
+      // We are assuming the values are already normalized
+      double magnitudeDb = (10 * (log(magnitude / 256) / ln10));
       int bucketIndex = ((i - start) / samplesPerBucket).floor();
-      histogram[bucketIndex] += samples[i];
+      histogram[bucketIndex] += (magnitudeDb == -double.infinity) ? 0 : magnitudeDb;
     }
 
-    // Massage the data for visualization
-    for (var i = 0; i < histogram.length; ++i) {
-      histogram[i] = (histogram[i] / samplesPerBucket).abs().round();
-    }
-    
-    return histogram;
+    // Average the bins, round the results and return an inverted dB scale
+    return histogram.map((double d) {
+      return (-10 * d / samplesPerBucket).round();
+    }).toList();
   }
 
   @override
@@ -344,22 +351,22 @@ class RadialSeekBarState extends State<RadialSeekBar> {
         height: double.infinity,
         color: Colors.transparent,
         child: new Center(
-          child: new Container(
-            width: 140.0,
-            height: 140.0,
-            child: new RadialProgressBar(
-              trackColor: const Color(0xFFDDDDDD),
-              progressPercent: _progress,
-              progressColor: accentColor,
-              thumbPosition: thumbPosition,
-              thumbColor: lightAccentColor,
-              innerPadding: const EdgeInsets.all(10.0),
-              child: new ClipOval(
-                clipper: new CircleClipper(),
-                child: widget.child,
+            child: new Container(
+              width: 140.0,
+              height: 140.0,
+              child: new RadialProgressBar(
+                trackColor: const Color(0xFFDDDDDD),
+                progressPercent: _progress,
+                progressColor: accentColor,
+                thumbPosition: thumbPosition,
+                thumbColor: lightAccentColor,
+                innerPadding: const EdgeInsets.all(10.0),
+                child: new ClipOval(
+                  clipper: new CircleClipper(),
+                  child: widget.child,
+                ),
               ),
-            ),
-          )
+            )
         ),
       ),
     );
@@ -459,17 +466,17 @@ class RadialSeekBarPainter extends CustomPainter {
     @required thumbColor,
     @required this.thumbPosition,
   }) : trackPaint = new Paint()
-        ..color = trackColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = trackWidth,
-       progressPaint = new Paint()
-        ..color = progressColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = progressWidth
-        ..strokeCap = StrokeCap.round,
-       thumbPaint = new Paint()
-        ..color = thumbColor
-        ..style = PaintingStyle.fill;
+    ..color = trackColor
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = trackWidth,
+        progressPaint = new Paint()
+          ..color = progressColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = progressWidth
+          ..strokeCap = StrokeCap.round,
+        thumbPaint = new Paint()
+          ..color = thumbColor
+          ..style = PaintingStyle.fill;
 
   @override
   void paint(Canvas canvas, Size size) {
